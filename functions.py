@@ -80,17 +80,88 @@ def iterate_clustering(data, essential_cols, eps=0.1, max_iterations=None ):
         data['cluster'] = clusters
 
 
-def our_k_means_adv(k, data, essential_cols, eps=0.1, max_iterations=None):
+def our_k_means_adv_old(k, data, essential_cols, eps=0.1, max_iterations=None):
     data = data.copy()
     data['cluster'] = initialise_clusters_adv(k, data, essential_cols)
     iterate_clustering(data, essential_cols, eps=eps, max_iterations=max_iterations)
     return data
 
-def our_k_means_standard(k, data, essential_cols, eps=0.1, max_iterations=None):
-    data = data.copy()
-    data['cluster'] = initialise_clusters_standard(k, data, essential_cols)
-    iterate_clustering(data, essential_cols, eps=eps,  max_iterations=max_iterations)
+def our_k_means_standard(k, data_path, essential_cols, nrows=10**4, chunksize=10**3, upper_bound_for_iterations=50 ):
+    centers = init_centers_standard(k, data_path, essential_cols, nrows=nrows)
+    # data = pd.read_csv(data_path, nrows=nrows)
+    # centers = data[essential_cols].head(k) # non-random-init
+    # print(centers)
+    previous_centers = None
+    for _ in range(upper_bound_for_iterations):
+        previous_centers = centers.copy()
+        map_res = my_map(data_path, essential_cols, centers, chunksize, nrows)
+        centers = my_reduce(map_res, essential_cols)
+        if centers.equals(previous_centers):
+            break
+    data = pd.read_csv(data_path, nrows=nrows)
+    data['cluster'] = cluster(data, essential_cols, centers)
     return data
+
+def our_k_means_adv(k, data_path, essential_cols, nrows=10**4, chunksize=10**3, upper_bound_for_iterations=50 ):
+    centers = init_centers_adv(k, data_path, essential_cols, nrows=nrows)
+    # data = pd.read_csv(data_path, nrows=nrows)
+    # centers = data[essential_cols].head(k) # non-random-init
+    # print(centers)
+    previous_centers = None
+    for _ in range(upper_bound_for_iterations):
+        previous_centers = centers.copy()
+        map_res = my_map(data_path, essential_cols, centers, chunksize, nrows)
+        centers = my_reduce(map_res, essential_cols)
+        if centers.equals(previous_centers):
+            break
+    data = pd.read_csv(data_path, nrows=nrows)
+    data['cluster'] = cluster(data, essential_cols, centers)
+    return data
+
+
+
+def init_centers_standard(k, data_path, essential_cols, nrows):
+    data = pd.read_csv(data_path, nrows = nrows)
+    centers = data[essential_cols].sample(k).copy()
+    return centers
+
+def init_centers_adv(k, data_path, essential_cols, nrows):
+    distances_df = pd.DataFrame()
+    data = pd.read_csv(data_path, nrows = nrows)
+    centers = data[essential_cols].sample(1)
+    for i in range(k-1):
+        distances_df[str(i)] = np.linalg.norm(data[essential_cols].to_numpy() - centers.iloc[i].to_numpy(), axis=1)
+        distances = distances_df.min(axis=1).to_numpy()
+        center_index = np.random.choice( np.arange(0,len(data)), p=distances/sum(distances) )
+        centers = pd.concat([centers, pd.DataFrame(data[essential_cols].iloc[center_index,:]).T])
+    return centers
+
+
+def cluster(data, essential_cols, centers):
+    distance_df = pd.DataFrame()
+    # print(data[essential_cols])
+    for i, center in centers[essential_cols].iterrows():
+        # print(center)
+        distance_df[str(i)] = np.linalg.norm(data[essential_cols].to_numpy() - center.to_numpy(), axis=1)
+    clustering = distance_df.idxmin(axis=1)
+    return clustering
+
+def my_map(data_path, essential_cols, centers, chunksize, nrows):
+    map_res = pd.DataFrame()
+    for chunk in pd.read_csv(data_path, chunksize=chunksize, nrows=nrows):
+        chunk['cluster'] = cluster(chunk, essential_cols, centers).to_numpy()
+        right = chunk.groupby('cluster').size().reset_index(name='count')
+        left = chunk.groupby('cluster')[essential_cols].agg(lambda x : x.sum() ).reset_index()
+        merged = pd.merge(left=left, right=right, left_on='cluster', right_on='cluster')
+        map_res = pd.concat([map_res, merged])
+    return map_res
+
+
+def my_reduce(map_res, essential_cols):
+    map_res_grouped = map_res.groupby('cluster').agg(lambda x:  x.sum())
+    return map_res_grouped.reset_index().apply( lambda row : row[essential_cols]/row['count'], axis=1)
+
+
 
 
 def compute_wcss(k, data, essential_cols):
@@ -108,13 +179,3 @@ def compute_wcss(k, data, essential_cols):
     return wcss
    
    
-   	
-   	
-
-# data = get_data_from_2_2(100)
-# our_k_means_adv(4, data, ['0', '1', '2'], eps=1, max_iterations=2)
-
-# our_k_means_standard(4, data, ['0', '1', '2'], eps=1, max_iterations=2)
-
-
-
