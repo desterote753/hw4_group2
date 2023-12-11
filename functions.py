@@ -154,6 +154,7 @@ def my_map(data_path, essential_cols, centers, chunksize, nrows):
         left = chunk.groupby('cluster')[essential_cols].agg(lambda x : x.sum() ).reset_index()
         merged = pd.merge(left=left, right=right, left_on='cluster', right_on='cluster')
         map_res = pd.concat([map_res, merged])
+        # map_res.reset_index(inplace=True, drop=True)
     return map_res
 
 
